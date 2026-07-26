@@ -641,10 +641,16 @@ final class AppModel: ObservableObject {
             ),
             to: managerID
         )
-        performSend(
-            resumeInstruction(for: workflow),
-            to: activeProfileID
-        )
+        let instruction: String
+        if let dispatch = workflow.deliveredDispatch,
+           dispatch.id == workflow.deliveredDispatchID {
+            instruction = dispatch.kind == .initialBuild
+                ? resumeInstruction(for: workflow)
+                : runtimeInstruction(for: dispatch, workflow: workflow)
+        } else {
+            instruction = resumeInstruction(for: workflow)
+        }
+        performSend(instruction, to: activeProfileID)
     }
 
     func markViewed(_ profileID: UUID) {
@@ -1332,6 +1338,7 @@ final class AppModel: ObservableObject {
         }
         currentWorkflow.pendingDispatch = nil
         currentWorkflow.deliveredDispatchID = dispatchID
+        currentWorkflow.deliveredDispatch = currentDispatch
         currentWorkflow.resumeAvailableAfterRestart = false
         currentWorkflow.isPaused = false
         currentWorkflow.pauseReason = nil

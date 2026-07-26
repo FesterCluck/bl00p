@@ -19,6 +19,9 @@ The current prototype includes:
 - Real Codex sessions powered by `codex app-server`, with workspace-scoped writes and in-app approvals for commands, file changes, extra permissions, and connected-app mutations
 - Real, resumable Claude Code builder and PR-writer sessions with in-app tool approvals
 - Local JSON persistence
+- Persisted workflow handoffs and delivered dispatch payloads so an app restart
+  can resume with the original plan, review findings, publishing context, and
+  draft PR details intact
 
 ## Run the prototype
 
@@ -80,6 +83,10 @@ persisted workflow with this sequence:
 
 Questions, failures, and approval requests pause the workflow for the user.
 Leaving any team assignment unset keeps that Manager in standalone chat mode.
+If bl00p restarts while a team handoff is being delivered, the saved dispatch
+is retried; if the dispatch was already recorded as delivered, the same saved
+payload is used when you choose Resume instead of replacing it with a generic
+stage prompt.
 
 ## Runtime boundary
 

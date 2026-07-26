@@ -49,6 +49,9 @@ All notable changes to bl00p are documented in this file.
 - Stage Claude image attachments in an isolated temporary directory and remove them after each turn.
 - Keep Manager sessions plan-only and read-only, prevent hidden delegation,
   and reserve team dispatch for bl00p's visible managed workflow.
+- Preserve managed workflow dispatch payloads through runtime delivery and
+  restart recovery, including implementation plans, review findings, and
+  publishing and reporting details.
 
 ### Tests
 
@@ -57,4 +60,5 @@ All notable changes to bl00p are documented in this file.
 - Expand coverage for notifications, Dock badges, model and prompt isolation, image attachments, session recovery, state migration, composer sizing, automatic reconnects, and long-lived runtime streams.
 - Cover the Codex approval mode toggle and backward-compatible decoding of bot profiles missing newer fields.
 - Cover Manager plan approval, visible team dispatch, restart persistence,
-  read-only Codex configuration, and role-specific avatar colors.
+  delivered dispatch payload recovery, read-only Codex configuration, and
+  role-specific avatar colors.

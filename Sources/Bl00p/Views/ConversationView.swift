@@ -5,7 +5,6 @@ struct ConversationView: View {
     @ObservedObject var model: AppModel
     @State private var draft = ""
     @State private var attachments: [ImageAttachment] = []
-    @State private var isDropTargeted = false
 
     var body: some View {
         if let profile = model.selectedProfile {
@@ -76,27 +75,9 @@ struct ConversationView: View {
                 )
             }
             .background(Color(nsColor: .textBackgroundColor))
-            .contentShape(Rectangle())
-            .overlay {
-                if isDropTargeted {
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .stroke(
-                            Color.bl00pPink,
-                            style: .init(lineWidth: 2, dash: [7])
-                        )
-                        .padding(7)
-                        .allowsHitTesting(false)
-                }
-            }
-            .dropDestination(for: URL.self) { urls, _ in
-                addImages(urls)
-            } isTargeted: { targeted in
-                isDropTargeted = targeted
-            }
             .onChange(of: profile.id) { _, _ in
                 draft = ""
                 attachments = []
-                isDropTargeted = false
             }
         } else {
             ContentUnavailableView(
@@ -105,15 +86,6 @@ struct ConversationView: View {
                 description: Text("Choose or add a bot to begin.")
             )
         }
-    }
-
-    private func addImages(_ urls: [URL]) -> Bool {
-        let additions = ImageDropValidator.attachments(
-            from: urls,
-            excluding: attachments
-        )
-        attachments.append(contentsOf: additions)
-        return !additions.isEmpty
     }
 }
 
@@ -750,6 +722,7 @@ private struct ComposerView: View {
     @Binding var attachments: [ImageAttachment]
     let isEnabled: Bool
     let send: () -> Void
+    @State private var isDropTargeted = false
     @State private var editorWidth: CGFloat = 600
     @State private var didReachCharacterLimit = false
     @FocusState private var isEditorFocused: Bool
@@ -821,7 +794,7 @@ private struct ComposerView: View {
             HStack {
                 Text(
                     isEnabled
-                        ? "Drop images anywhere · ⌘↩ to send"
+                        ? "Drop images here · ⌘↩ to send"
                         : "Working…"
                 )
 
@@ -838,6 +811,19 @@ private struct ComposerView: View {
         .padding(.horizontal, 24)
         .padding(.vertical, 18)
         .background(.bar)
+        .overlay {
+            if isDropTargeted {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(Color.bl00pPink, style: .init(lineWidth: 2, dash: [6]))
+                    .padding(7)
+                    .allowsHitTesting(false)
+            }
+        }
+        .dropDestination(for: URL.self) { urls, _ in
+            addImages(urls)
+        } isTargeted: { targeted in
+            isDropTargeted = targeted
+        }
         .task(id: profileID) {
             await Task.yield()
             isEditorFocused = true
@@ -898,23 +884,17 @@ private struct ComposerView: View {
         )
     }
 
-}
-
-enum ImageDropValidator {
-    static func attachments(
-        from urls: [URL],
-        excluding existing: [ImageAttachment]
-    ) -> [ImageAttachment] {
-        var knownPaths = Set(existing.map(\.path))
-        return urls.compactMap { url in
+    private func addImages(_ urls: [URL]) -> Bool {
+        let existingPaths = Set(attachments.map(\.path))
+        let additions = urls.compactMap { url -> ImageAttachment? in
             let standardized = url.standardizedFileURL
             guard standardized.isFileURL,
-                  knownPaths.insert(standardized.path).inserted,
-                  NSImage(contentsOf: standardized) != nil else {
-                return nil
-            }
+                  !existingPaths.contains(standardized.path),
+                  NSImage(contentsOf: standardized) != nil else { return nil }
             return ImageAttachment(path: standardized.path)
         }
+        attachments.append(contentsOf: additions)
+        return !additions.isEmpty
     }
 }
 

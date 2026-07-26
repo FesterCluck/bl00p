@@ -480,6 +480,7 @@ struct ManagerWorkflow: Identifiable, Codable, Hashable, Sendable {
     var planApprovalEntryID: UUID?
     var pendingDispatch: ManagerWorkflowDispatch?
     var deliveredDispatchID: UUID?
+    var deliveredDispatch: ManagerWorkflowDispatch?
     var resumeAvailableAfterRestart: Bool?
     var stage: ManagerWorkflowStage
     var branch: String?
@@ -499,6 +500,7 @@ struct ManagerWorkflow: Identifiable, Codable, Hashable, Sendable {
         planApprovalEntryID: UUID? = nil,
         pendingDispatch: ManagerWorkflowDispatch? = nil,
         deliveredDispatchID: UUID? = nil,
+        deliveredDispatch: ManagerWorkflowDispatch? = nil,
         resumeAvailableAfterRestart: Bool? = nil,
         stage: ManagerWorkflowStage = .planning,
         branch: String? = nil,
@@ -517,6 +519,7 @@ struct ManagerWorkflow: Identifiable, Codable, Hashable, Sendable {
         self.planApprovalEntryID = planApprovalEntryID
         self.pendingDispatch = pendingDispatch
         self.deliveredDispatchID = deliveredDispatchID
+        self.deliveredDispatch = deliveredDispatch
         self.resumeAvailableAfterRestart = resumeAvailableAfterRestart
         self.stage = stage
         self.branch = branch

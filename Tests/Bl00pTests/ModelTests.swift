@@ -1251,6 +1251,9 @@ private func assertRecoveredWorkflowDispatch(
     #expect(model.workflow(for: managerID)?.pendingDispatch == nil)
     #expect(model.workflow(for: managerID)?.deliveredDispatchID == dispatchID)
     #expect(
+        model.workflow(for: managerID)?.deliveredDispatch?.id == dispatchID
+    )
+    #expect(
         model.session(for: targetID).entries.filter {
             $0.id == dispatchID
         }.count == 1
@@ -1281,6 +1284,9 @@ private func assertRecoveredWorkflowDispatch(
     #expect(resumeCall.role == expectedRole)
     #expect(resumeCall.workingDirectory == package.worktreePath)
     #expect(resumeCall.message.contains(package.branch))
+    if kind == .publishing {
+        #expect(resumeCall.message.contains("Persisted stage summary"))
+    }
     #expect(
         restoredModel.session(for: targetID).entries.filter {
             $0.id == dispatchID
@@ -1288,52 +1294,146 @@ private func assertRecoveredWorkflowDispatch(
     )
 }
 
+@MainActor
 @Test
-func imageDropValidationRejectsInvalidAndDuplicateFiles() throws {
-    let directory = FileManager.default.temporaryDirectory
-        .appendingPathComponent(
-            "bl00p-image-drop-\(UUID().uuidString)",
-            isDirectory: true
-        )
-    try FileManager.default.createDirectory(
-        at: directory,
-        withIntermediateDirectories: true
-    )
-    defer { try? FileManager.default.removeItem(at: directory) }
-
-    let imageURL = directory.appendingPathComponent("image.png")
-    let invalidURL = directory.appendingPathComponent("notes.txt")
-    let image = NSImage(
-        size: NSSize(width: 2, height: 2),
-        flipped: false
-    ) { _ in
-        NSColor.systemPink.setFill()
-        NSRect(x: 0, y: 0, width: 2, height: 2).fill()
-        return true
-    }
-    let representation = try #require(
-        image.tiffRepresentation.flatMap {
-            NSBitmapImageRep(data: $0)?.representation(
-                using: .png,
-                properties: [:]
+func pendingDispatchPayloadsSurviveRestartBeforeRuntimeResponse() async throws {
+    for kind in [
+        ManagerWorkflowDispatchKind.revision,
+        .publishing,
+        .reporting
+    ] {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(
+                "bl00p-\(kind.rawValue)-payload-recovery-\(UUID().uuidString)",
+                isDirectory: true
             )
-        }
-    )
-    try representation.write(to: imageURL)
-    try Data("not an image".utf8).write(to: invalidURL)
+        defer { try? FileManager.default.removeItem(at: directory) }
 
-    let additions = ImageDropValidator.attachments(
-        from: [imageURL, imageURL, invalidURL],
-        excluding: []
-    )
-    #expect(additions.count == 1)
-    #expect(additions.first?.path == imageURL.path)
-    #expect(
-        ImageDropValidator.attachments(
-            from: [imageURL],
-            excluding: additions
-        ).isEmpty
-    )
+        let managerID = UUID()
+        let builderID = UUID()
+        let reviewerID = UUID()
+        let publisherID = UUID()
+        let ownership = GitWorktreeOwnership(
+            ownerProfileID: builderID,
+            repositoryPath: "/tmp/project",
+            worktreePath: "/tmp/.bl00p-worktrees/payload-recovery",
+            branch: "bl00p/payload-recovery",
+            baseRevision: "abc123"
+        )
+        let team = ManagerTeamConfiguration(
+            builderProfileID: builderID,
+            reviewerProfileID: reviewerID,
+            publisherProfileID: publisherID
+        )
+        let manager = BotProfile(
+            id: managerID,
+            name: "Manager",
+            provider: .codex,
+            role: .manager,
+            instructions: "Coordinate.",
+            workingDirectory: "/tmp/project",
+            managerTeam: team
+        )
+        let builder = BotProfile(
+            id: builderID,
+            name: "Builder",
+            provider: .claude,
+            role: .builder,
+            instructions: "Implement.",
+            workingDirectory: kind == .revision ? "" : ownership.repositoryPath,
+            worktree: kind == .revision ? nil : ownership
+        )
+        let reviewer = BotProfile(
+            id: reviewerID,
+            name: "Reviewer",
+            provider: .codex,
+            role: .reviewer,
+            instructions: "Review.",
+            workingDirectory: "/tmp/project"
+        )
+        let publisher = BotProfile(
+            id: publisherID,
+            name: "Publisher",
+            provider: .claude,
+            role: .publisher,
+            instructions: "Publish.",
+            workingDirectory: "/tmp/wrong-publisher-checkout"
+        )
+        let package = GitHandoffPackage(
+            sourceProfileID: builderID,
+            sourceName: "Builder",
+            repositoryPath: ownership.repositoryPath,
+            worktreePath: ownership.worktreePath,
+            branch: ownership.branch,
+            baseRevision: ownership.baseRevision,
+            headRevision: "def456",
+            taskContext: "Recover the delivered payload",
+            testStatus: .passed,
+            testSummary: "`swift test` — passed",
+            workingTreeSummary: "Clean"
+        )
+        let dispatch = ManagerWorkflowDispatch(
+            kind: kind,
+            sourceProfileID: kind == .revision ? reviewerID : publisherID,
+            targetProfileID: kind == .revision ? builderID : managerID,
+            summary: kind == .revision
+                ? "Reviewer found a missing regression test."
+                : kind == .publishing
+                    ? "Publisher completed the documentation pass."
+                    : "Draft PR: https://github.com/suttree/bl00p/pull/123",
+            handoff: kind == .publishing ? package : nil
+        )
+        let workflow = ManagerWorkflow(
+            managerProfileID: managerID,
+            team: team,
+            request: "Recover the delivered payload",
+            pendingDispatch: dispatch,
+            stage: kind.stage,
+            latestHandoff: kind == .publishing ? package : nil,
+            isPaused: true,
+            pauseReason: "Preparing the persisted workflow handoff."
+        )
+        let store = AppStateStore(
+            fileURL: directory.appendingPathComponent("state.json")
+        )
+        store.save(
+            PersistedAppState(
+                profiles: [manager, builder, reviewer, publisher],
+                sessions: Dictionary(
+                    uniqueKeysWithValues: [manager, builder, reviewer, publisher]
+                        .map { ($0.id, AgentSessionState()) }
+                ),
+                selectedBotID: managerID,
+                managerWorkflows: [managerID: workflow]
+            )
+        )
+
+        let blockedRuntime = BlockingWorkflowRuntime()
+        let model = AppModel(runtime: blockedRuntime, store: store)
+        for _ in 0..<100 where await blockedRuntime.responseStarted == false {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(await blockedRuntime.responseStarted)
+        #expect(model.workflow(for: managerID)?.pendingDispatch == nil)
+        #expect(
+            model.workflow(for: managerID)?.deliveredDispatch?.id == dispatch.id
+        )
+
+        let restoredRuntime = SuspendedWorkflowRuntime()
+        let restoredModel = AppModel(runtime: restoredRuntime, store: store)
+        #expect(
+            restoredModel.workflow(for: managerID)?
+                .resumeAvailableAfterRestart == true
+        )
+        restoredModel.resumeWorkflow(managerID)
+        for _ in 0..<100 where await restoredRuntime.calls.count != 1 {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+
+        let call = try #require(await restoredRuntime.calls.first)
+        #expect(call.message.contains(dispatch.summary))
+        await blockedRuntime.release()
+    }
 }
 
 @MainActor
@@ -2829,6 +2929,56 @@ private actor SuspendedWorkflowRuntime: AgentRuntime {
             continuation.yield(.status(.working))
             continuation.finish()
         }
+    }
+
+    func resolveApproval(
+        entryID: UUID,
+        approved: Bool,
+        profile: BotProfile
+    ) async -> AsyncStream<AgentEvent> {
+        AsyncStream { $0.finish() }
+    }
+
+    func stop(profile: BotProfile) async {}
+}
+
+private actor BlockingWorkflowRuntime: AgentRuntime {
+    private(set) var responseStarted = false
+    private var responseContinuation:
+        CheckedContinuation<AsyncStream<AgentEvent>, Never>?
+
+    func start(
+        profile: BotProfile,
+        resumeThreadID: String?
+    ) async -> AsyncStream<AgentEvent> {
+        AsyncStream { continuation in
+            continuation.yield(
+                .sessionID(
+                    resumeThreadID
+                        ?? "blocked-(profile.id.uuidString)"
+                )
+            )
+            continuation.yield(.status(.needsAnswer))
+            continuation.finish()
+        }
+    }
+
+    func respond(
+        to message: String,
+        attachments: [ImageAttachment],
+        profile: BotProfile
+    ) async -> AsyncStream<AgentEvent> {
+        responseStarted = true
+        return await withCheckedContinuation { continuation in
+            responseContinuation = continuation
+        }
+    }
+
+    func release() {
+        responseContinuation?.resume(
+            returning: AsyncStream { $0.finish() }
+        )
+        responseContinuation = nil
     }
 
     func resolveApproval(
