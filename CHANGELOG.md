@@ -36,6 +36,8 @@ All notable changes to bl00p are documented in this file.
 
 ### Fixed
 
+- Focus the bot name field when the sidebar rename alert opens without
+  replacing text entered during presentation.
 - Keep the selected provider when adding a bot, including after switching between Claude and Codex.
 - Focus the message composer when the app opens or the user switches bots.
 - Keep loading saved profiles and sessions when a bot profile gains new fields, instead of silently discarding all persisted state on decode failure.
