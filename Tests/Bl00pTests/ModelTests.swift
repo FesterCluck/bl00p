@@ -1288,6 +1288,54 @@ private func assertRecoveredWorkflowDispatch(
     )
 }
 
+@Test
+func imageDropValidationRejectsInvalidAndDuplicateFiles() throws {
+    let directory = FileManager.default.temporaryDirectory
+        .appendingPathComponent(
+            "bl00p-image-drop-\(UUID().uuidString)",
+            isDirectory: true
+        )
+    try FileManager.default.createDirectory(
+        at: directory,
+        withIntermediateDirectories: true
+    )
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    let imageURL = directory.appendingPathComponent("image.png")
+    let invalidURL = directory.appendingPathComponent("notes.txt")
+    let image = NSImage(
+        size: NSSize(width: 2, height: 2),
+        flipped: false
+    ) { _ in
+        NSColor.systemPink.setFill()
+        NSRect(x: 0, y: 0, width: 2, height: 2).fill()
+        return true
+    }
+    let representation = try #require(
+        image.tiffRepresentation.flatMap {
+            NSBitmapImageRep(data: $0)?.representation(
+                using: .png,
+                properties: [:]
+            )
+        }
+    )
+    try representation.write(to: imageURL)
+    try Data("not an image".utf8).write(to: invalidURL)
+
+    let additions = ImageDropValidator.attachments(
+        from: [imageURL, imageURL, invalidURL],
+        excluding: []
+    )
+    #expect(additions.count == 1)
+    #expect(additions.first?.path == imageURL.path)
+    #expect(
+        ImageDropValidator.attachments(
+            from: [imageURL],
+            excluding: additions
+        ).isEmpty
+    )
+}
+
 @MainActor
 @Test
 func decliningAManagerPlanPausesBeforeAnyBuilderHandoff() async throws {
